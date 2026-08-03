@@ -2,7 +2,7 @@
   "name": "vscode-spring-workspace-supervisor",
   "displayName": "Spring Workspace Supervisor",
   "description": "Coordinates Java project import, repairs Spring tooling refreshes, and provides a resilient Spring Boot application dashboard.",
-  "version": "0.5.0",
+  "version": "0.4.2",
   "publisher": "hello-datang",
   "license": "MIT",
   "repository": {
@@ -276,7 +276,7 @@
         "springSupervisor.enableSlashEndpointWorkspaceSymbols": {
           "type": "boolean",
           "default": true,
-          "description": "Expose Spring Endpoint Mapping results to workspace-symbol consumers and the slash-aware Ctrl+T picker when a query contains /."
+          "description": "Contribute Spring Endpoint Mapping results to VS Code native Ctrl+T workspace-symbol search when the query contains /. This does not replace or rebind Ctrl+T."
         },
         "springSupervisor.overrideCtrlT": {
           "type": "boolean",

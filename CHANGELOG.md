@@ -1,5 +1,12 @@
 # Change Log
 
+## 0.4.2
+
+- Keep VS Code's native Ctrl+T command and keybinding unchanged.
+- Activate Spring Boot Tools on demand before requesting Endpoint Mapping workspace symbols.
+- Contribute URL-path results through the standard WorkspaceSymbolProvider only.
+- Add diagnostic output when Spring Boot Tools does not expose an active language client or returns no endpoint symbols.
+
 ## 0.5.0
 
 - Replace the native Ctrl+T picker with a compatible workspace-symbol picker that supports URL paths containing forward slashes.

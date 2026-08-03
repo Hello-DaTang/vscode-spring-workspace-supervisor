@@ -91,6 +91,19 @@ GET /admin-api/system/users
 
 Set `springSupervisor.overrideCtrlT` to `false` to restore VS Code's native Ctrl+T binding. The command remains available as **Spring Supervisor: Go to Workspace Symbol / Spring Endpoint**.
 
+## Native Ctrl+T endpoint search
+
+Version 0.4.2 does not replace or rebind Ctrl+T. It registers a standard VS Code Workspace Symbol Provider. When the native Ctrl+T query contains a forward slash, the provider requests Spring Endpoint Mappings and contributes matching results to the normal symbol picker.
+
+Examples:
+
+```text
+/admin-api/system/users
+GET /admin-api/system/users
+```
+
+If no results appear, open **Output → Spring Workspace Supervisor** and inspect lines beginning with `[endpoint-symbols]`.
+
 ## Automated releases
 
 GitHub Actions builds and tests the Supervisor on every push to `main`. It reads the version from `package.json` and creates a versioned GitHub Release when the corresponding tag does not exist.
