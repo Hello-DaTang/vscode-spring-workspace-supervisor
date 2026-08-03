@@ -92,10 +92,12 @@ Press `F5` in VS Code to launch an Extension Development Host.
 | Setting | Default | Purpose |
 |---|---:|---|
 | `springSupervisor.quietPeriodMs` | `2500` | Stable window after import/classpath events |
-| `springSupervisor.maxJavaFilesPerProject` | `2000` | Maximum source files scanned per project |
+| `springSupervisor.maxMainClassFiles` | `5000` | Maximum likely main-class files scanned workspace-wide |
+| `springSupervisor.strictSpringStartGate` | `true` | Stop early Spring LS starts until Java settles |
 | `springSupervisor.activateSpringToolsAfterJavaReady` | `true` | Request Spring Tools activation after Java settles |
 | `springSupervisor.refreshOfficialDashboardAfterSettle` | `true` | Refresh official Spring views after settling |
-| `springSupervisor.verifyRuntimeClasspath` | `true` | Verify Spring dependencies with Java classpath API |
+| `springSupervisor.springRefreshDelayMs` | `5000` | Delay before refreshing official Spring views |
+| `springSupervisor.verifyRuntimeClasspath` | `false` | Optional classpath verification; slower on large workspaces |
 | `springSupervisor.defaultProfiles` | `[]` | Profiles used by supervisor Run/Debug |
 | `springSupervisor.vmArgs` | empty | Extra JVM arguments for supervisor launches |
 

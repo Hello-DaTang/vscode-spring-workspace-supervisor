@@ -17,6 +17,13 @@ export class SpringWorkspaceSupervisor implements vscode.Disposable {
     private javaApi: JavaExtensionApi | undefined;
     private settleTimer: NodeJS.Timeout | undefined;
     private scanTimer: NodeJS.Timeout | undefined;
+    private officialRefreshTimer: NodeJS.Timeout | undefined;
+    private strictGateTimer: NodeJS.Timeout | undefined;
+    private strictGateInFlight = false;
+    private springStartAuthorized = false;
+    private lastEarlyStopAt = 0;
+    private scanInProgress: Promise<void> | undefined;
+    private pendingScanReason: string | undefined;
     private phase: SupervisorPhase = 'idle';
     private javaRunning = false;
     private javaReady = false;
@@ -37,11 +44,17 @@ export class SpringWorkspaceSupervisor implements vscode.Disposable {
 
     public async start(context: vscode.ExtensionContext): Promise<void> {
         this.output.appendLine('[supervisor] Starting Spring Workspace Supervisor.');
+        const springTools = vscode.extensions.getExtension(SPRING_TOOLS_EXTENSION_ID);
+        this.output.appendLine(`[spring-gate] Spring Boot Tools active at supervisor startup: ${springTools?.isActive ?? false}.`);
         this.registerWorkspaceWatchers(context);
         this.registerDebugSessionTracking(context);
+        this.startStrictSpringGate(context);
         this.setPhase('discovering');
-        await this.scanNow('initial workspace discovery');
+
+        // Java readiness and independent application discovery must run concurrently.
+        // A large source scan must never delay registration of Java import listeners.
         void this.bootstrapJava();
+        void this.scanNow('initial workspace discovery');
     }
 
     public getApplications(): readonly SpringBootApplication[] {
@@ -167,6 +180,12 @@ export class SpringWorkspaceSupervisor implements vscode.Disposable {
         }
         if (this.scanTimer) {
             clearTimeout(this.scanTimer);
+        }
+        if (this.officialRefreshTimer) {
+            clearTimeout(this.officialRefreshTimer);
+        }
+        if (this.strictGateTimer) {
+            clearInterval(this.strictGateTimer);
         }
         for (const disposable of this.disposables) {
             disposable.dispose();
@@ -312,19 +331,26 @@ export class SpringWorkspaceSupervisor implements vscode.Disposable {
             }
 
             this.settledAt = Date.now();
+            this.springStartAuthorized = true;
+            if (this.strictGateTimer) {
+                clearInterval(this.strictGateTimer);
+                this.strictGateTimer = undefined;
+            }
             this.output.appendLine(`[gate] Workspace settled after: ${reason}.`);
-            await this.scanNow('Java workspace settled');
 
+            // Start Spring tooling before the independent source scan. The old ordering
+            // made Spring wait minutes in large reactors even after Java was ready.
             if (vscode.workspace.getConfiguration('springSupervisor')
                 .get<boolean>('activateSpringToolsAfterJavaReady', true)) {
                 await this.activateSpringTools();
             }
             if (vscode.workspace.getConfiguration('springSupervisor')
                 .get<boolean>('refreshOfficialDashboardAfterSettle', true)) {
-                await this.refreshOfficialDashboard(false);
+                this.scheduleOfficialRefresh();
             }
 
             this.setPhase(this.lastError ? 'degraded' : 'healthy');
+            void this.scanNow('Java workspace settled');
         } catch (error) {
             this.recordError('Post-import Spring recovery failed', error);
         }
@@ -339,7 +365,12 @@ export class SpringWorkspaceSupervisor implements vscode.Disposable {
         }
         this.warnings.delete('Spring Boot Tools is not installed; the supervisor dashboard remains available.');
         this.setPhase('spring-starting');
-        if (!springTools.isActive) {
+        if (springTools.isActive) {
+            this.output.appendLine('[spring] Spring Boot Tools was already active when the workspace settled.');
+            this.warnings.add(
+                'Spring Boot Tools activated before the supervisor authorized startup. Another extension or activation event bypassed the gate.',
+            );
+        } else {
             await springTools.activate();
             this.output.appendLine('[spring] Activated Spring Boot Tools after Java workspace settlement.');
         }
@@ -357,6 +388,74 @@ export class SpringWorkspaceSupervisor implements vscode.Disposable {
         }
     }
 
+    private startStrictSpringGate(context: vscode.ExtensionContext): void {
+        const enabled = vscode.workspace.getConfiguration('springSupervisor')
+            .get<boolean>('strictSpringStartGate', true);
+        if (!enabled) {
+            this.output.appendLine('[spring-gate] Strict start gate is disabled.');
+            return;
+        }
+
+        this.output.appendLine('[spring-gate] Strict start gate enabled; early Spring LS starts will be stopped until Java settles.');
+        this.strictGateTimer = setInterval(() => {
+            void this.enforceStrictSpringGate();
+        }, 750);
+        context.subscriptions.push({ dispose: () => {
+            if (this.strictGateTimer) {
+                clearInterval(this.strictGateTimer);
+                this.strictGateTimer = undefined;
+            }
+        }});
+        void this.enforceStrictSpringGate();
+    }
+
+    private async enforceStrictSpringGate(): Promise<void> {
+        if (this.springStartAuthorized || this.strictGateInFlight) {
+            return;
+        }
+        const springTools = vscode.extensions.getExtension(SPRING_TOOLS_EXTENSION_ID);
+        if (!springTools?.isActive) {
+            return;
+        }
+        const now = Date.now();
+        if (now - this.lastEarlyStopAt < 2500) {
+            return;
+        }
+
+        const commands = new Set(await vscode.commands.getCommands(true));
+        if (!commands.has('vscode-spring-boot.ls.stop')) {
+            return;
+        }
+
+        this.strictGateInFlight = true;
+        try {
+            await vscode.commands.executeCommand('vscode-spring-boot.ls.stop');
+            this.lastEarlyStopAt = Date.now();
+            this.warnings.add(
+                'Spring Boot Tools attempted to activate before Java settled; the supervisor stopped its language server and will restart it later.',
+            );
+            this.output.appendLine('[spring-gate] Stopped an early Spring Boot Language Server start.');
+            this.emitHealth();
+        } catch (error) {
+            this.output.appendLine(`[spring-gate] Early stop attempt failed: ${toErrorMessage(error)}`);
+        } finally {
+            this.strictGateInFlight = false;
+        }
+    }
+
+    private scheduleOfficialRefresh(): void {
+        if (this.officialRefreshTimer) {
+            clearTimeout(this.officialRefreshTimer);
+        }
+        const delay = vscode.workspace.getConfiguration('springSupervisor')
+            .get<number>('springRefreshDelayMs', 5000);
+        this.output.appendLine(`[spring] Waiting ${delay}ms before refreshing official Spring views.`);
+        this.officialRefreshTimer = setTimeout(() => {
+            this.officialRefreshTimer = undefined;
+            void this.refreshOfficialDashboard(false);
+        }, delay);
+    }
+
     private scheduleScan(reason: string): void {
         if (this.scanTimer) {
             clearTimeout(this.scanTimer);
@@ -368,25 +467,48 @@ export class SpringWorkspaceSupervisor implements vscode.Disposable {
     }
 
     private async scanNow(reason: string): Promise<void> {
-        this.output.appendLine(`[scanner] Scan started: ${reason}.`);
-        try {
-            const runningIds = new Set(this.sessions.keys());
-            const applications = await this.scanner.scan(this.javaApi, this.javaReady);
-            for (const app of applications) {
-                if (runningIds.has(app.id)) {
-                    app.status = 'running';
-                } else if (!app.mainClass) {
-                    app.status = this.javaReady ? 'discovered' : 'importing';
-                } else {
-                    app.status = this.javaReady ? 'ready' : 'importing';
+        if (this.scanInProgress) {
+            this.pendingScanReason = reason;
+            this.output.appendLine(`[scanner] Scan already running; queued: ${reason}.`);
+            await this.scanInProgress;
+            return;
+        }
+
+        const startedAt = Date.now();
+        const task = (async () => {
+            this.output.appendLine(`[scanner] Scan started: ${reason}.`);
+            try {
+                const runningIds = new Set(this.sessions.keys());
+                const applications = await this.scanner.scan(this.javaApi, this.javaReady);
+                for (const app of applications) {
+                    if (runningIds.has(app.id)) {
+                        app.status = 'running';
+                    } else if (!app.mainClass) {
+                        app.status = this.javaReady ? 'discovered' : 'importing';
+                    } else {
+                        app.status = this.javaReady ? 'ready' : 'importing';
+                    }
                 }
+                this.applications = applications;
+                this.output.appendLine(
+                    `[scanner] Detected ${applications.length} Spring Boot application(s) in ${Date.now() - startedAt}ms.`,
+                );
+                this.applicationsChangedEmitter.fire(this.applications);
+                this.emitHealth();
+            } catch (error) {
+                this.recordError('Workspace scan failed', error);
             }
-            this.applications = applications;
-            this.output.appendLine(`[scanner] Detected ${applications.length} Spring Boot application(s).`);
-            this.applicationsChangedEmitter.fire(this.applications);
-            this.emitHealth();
-        } catch (error) {
-            this.recordError('Workspace scan failed', error);
+        })();
+        this.scanInProgress = task;
+        try {
+            await task;
+        } finally {
+            this.scanInProgress = undefined;
+            const pending = this.pendingScanReason;
+            this.pendingScanReason = undefined;
+            if (pending) {
+                void this.scanNow(pending);
+            }
         }
     }
 

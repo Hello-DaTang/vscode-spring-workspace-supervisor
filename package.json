@@ -2,7 +2,7 @@
   "name": "vscode-spring-workspace-supervisor",
   "displayName": "Spring Workspace Supervisor",
   "description": "Coordinates Java project import, repairs Spring tooling refreshes, and provides a resilient Spring Boot application dashboard.",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "publisher": "hello-datang",
   "license": "MIT",
   "repository": {
@@ -194,12 +194,17 @@
           "maximum": 30000,
           "description": "How long Java project import and classpath events must stay quiet before the workspace is considered settled."
         },
-        "springSupervisor.maxJavaFilesPerProject": {
+        "springSupervisor.maxMainClassFiles": {
           "type": "number",
-          "default": 2000,
-          "minimum": 50,
-          "maximum": 20000,
-          "description": "Maximum number of Java source files scanned in one project when locating Spring Boot main classes."
+          "default": 5000,
+          "minimum": 100,
+          "maximum": 50000,
+          "description": "Maximum number of likely Spring Boot main-class source files inspected across the workspace."
+        },
+        "springSupervisor.strictSpringStartGate": {
+          "type": "boolean",
+          "default": true,
+          "description": "While Java is importing, repeatedly stop an early Spring Boot Language Server start and restart it only after the Java workspace settles."
         },
         "springSupervisor.activateSpringToolsAfterJavaReady": {
           "type": "boolean",
@@ -211,10 +216,17 @@
           "default": true,
           "description": "Refresh the official Spring Boot Dashboard and Spring static data after Java project import settles."
         },
+        "springSupervisor.springRefreshDelayMs": {
+          "type": "number",
+          "default": 5000,
+          "minimum": 0,
+          "maximum": 60000,
+          "description": "Delay after starting Spring Boot Tools before refreshing official Spring views."
+        },
         "springSupervisor.verifyRuntimeClasspath": {
           "type": "boolean",
-          "default": true,
-          "description": "Ask the Red Hat Java extension for each detected application's runtime classpath to verify Spring Boot dependencies."
+          "default": false,
+          "description": "Optionally verify each detected application through the Red Hat Java runtime classpath API. Disabled by default because large multi-module workspaces can make these requests slow."
         },
         "springSupervisor.defaultProfiles": {
           "type": "array",
