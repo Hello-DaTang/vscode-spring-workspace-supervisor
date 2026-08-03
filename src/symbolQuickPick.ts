@@ -19,7 +19,7 @@ export class SlashAwareWorkspaceSymbolQuickPick {
 
     public show(): Promise<void> {
         const quickPick = vscode.window.createQuickPick<SymbolQuickPickItem>();
-        const disposables = new vscode.DisposableStore();
+        const disposables: vscode.Disposable[] = [];
         let debounceTimer: NodeJS.Timeout | undefined;
         let cancellation: vscode.CancellationTokenSource | undefined;
 
@@ -46,8 +46,8 @@ export class SlashAwareWorkspaceSymbolQuickPick {
             }, SEARCH_DEBOUNCE_MS);
         };
 
-        disposables.add(quickPick.onDidChangeValue(scheduleSearch));
-        disposables.add(quickPick.onDidAccept(() => {
+        disposables.push(quickPick.onDidChangeValue(scheduleSearch));
+        disposables.push(quickPick.onDidAccept(() => {
             const selected = quickPick.selectedItems[0];
             if (!selected?.location) {
                 return;
@@ -60,13 +60,15 @@ export class SlashAwareWorkspaceSymbolQuickPick {
         quickPick.show();
 
         return new Promise<void>((resolve) => {
-            disposables.add(quickPick.onDidHide(() => {
+            disposables.push(quickPick.onDidHide(() => {
                 if (debounceTimer) {
                     clearTimeout(debounceTimer);
                 }
                 cancellation?.cancel();
                 cancellation?.dispose();
-                disposables.dispose();
+                while (disposables.length > 0) {
+                    disposables.pop()?.dispose();
+                }
                 quickPick.dispose();
                 resolve();
             }));
@@ -88,7 +90,8 @@ export class SlashAwareWorkspaceSymbolQuickPick {
 
         quickPick.busy = true;
         try {
-            const symbols = isEndpointPathQuery(query)
+            const endpointMode = isEndpointPathQuery(query);
+            const symbols = endpointMode
                 ? await this.endpointSymbols.search(query, token)
                 : await executeWorkspaceSymbolSearch(query);
 
@@ -96,7 +99,7 @@ export class SlashAwareWorkspaceSymbolQuickPick {
                 return;
             }
 
-            const mode = isEndpointPathQuery(query) ? 'endpoint' : 'workspace';
+            const mode = endpointMode ? 'endpoint' : 'workspace';
             const items = deduplicate(symbols)
                 .slice(0, MAX_RESULTS)
                 .map((symbol) => toQuickPickItem(symbol, mode));
@@ -105,7 +108,7 @@ export class SlashAwareWorkspaceSymbolQuickPick {
                 ? items
                 : [{
                     label: '$(search-stop) No matching symbols',
-                    description: mode === 'endpoint'
+                    description: endpointMode
                         ? 'Spring Endpoint Mappings returned no matching URL path'
                         : 'No matching workspace symbols',
                     alwaysShow: true,
