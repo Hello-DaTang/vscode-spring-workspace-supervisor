@@ -6,60 +6,99 @@ The extension addresses a recurring failure mode in which Spring Boot Tools or t
 
 ## Install
 
-Download the latest `.vsix` package from the repository **Releases** page. The asset is named like:
+Download the latest Supervisor `.vsix` from the repository **Releases** page. The asset is named like:
 
 ```text
-spring-workspace-supervisor-v0.1.0.vsix
+spring-workspace-supervisor-v0.4.0.vsix
 ```
 
-Install it in VS Code using either method:
-
-1. Open **Extensions**.
-2. Select the `...` menu.
-3. Select **Install from VSIX...**.
-4. Choose the downloaded file.
-
-Or run:
+Install it through **Extensions → ... → Install from VSIX...**, or run:
 
 ```bash
-code --install-extension spring-workspace-supervisor-v0.1.0.vsix
+code --install-extension spring-workspace-supervisor-v0.4.0.vsix --force
 ```
 
-Reload VS Code after installation. The **Spring Supervisor** activity-bar entry will appear when a Java/Spring workspace is opened.
+Reload VS Code after installation. The **Spring Supervisor** activity-bar entry appears when a Java/Spring workspace is opened.
 
-## Automated releases
+## Optional Spring Boot Tools root-fix build
 
-GitHub Actions builds and tests the extension on every push to `main`. It reads the version from `package.json` and creates a GitHub Release when the corresponding tag does not already exist.
+The repository also builds an unofficial, source-auditable Spring Boot Tools VSIX from a pinned upstream commit. It retains the extension ID `vmware.vscode-spring-boot`, so it replaces the Marketplace build and remains compatible with the official Spring Boot Dashboard.
 
-For example:
+The root-fix build:
+
+- extends JDT classpath-listener registration from 10 seconds to 3 minutes;
+- reports classpath listening as supported only after registration succeeds;
+- explicitly handles terminal registration errors instead of producing Reactor `onErrorDropped`;
+- cancels in-flight registration when disabled;
+- cleans callback commands and dynamic capabilities after failure or cancellation.
+
+Before testing the root-fix VSIX, use:
 
 ```json
 {
-  "version": "0.2.0"
+  "springSupervisor.strictSpringStartGate": false,
+  "springSupervisor.waitForWorkspaceInitialized": true,
+  "springSupervisor.verifyRuntimeClasspath": false
 }
 ```
 
-After that version is pushed to `main`, Actions publishes tag `v0.2.0` and attaches `spring-workspace-supervisor-v0.2.0.vsix`.
+The longer internal timeout is intended to let the first Spring registration survive a large Java workspace import. The Supervisor should therefore not stop that registration while this build is being tested.
 
-A version is published only once. Increase `package.json` version before publishing another release.
+Install the root-fix package with:
 
-## What the MVP does
+```bash
+code --install-extension spring-boot-tools-rootfix-2.4.1.vsix --force
+```
 
-- Activates the Red Hat Java extension and observes its public `serverRunning`, `serverReady`, project-import, classpath-update, project-delete, and server-mode events.
+Because the VSIX uses the same extension ID as the Marketplace extension, disable automatic updates for **Spring Boot Tools** while testing it. Reinstalling the Marketplace version restores the official build.
+
+The root-fix source transformation is stored in `scripts/apply-spring-tools-root-fix.py`, and the reproducible build is defined in `.github/workflows/build-spring-tools-rootfix.yml`.
+
+## Ctrl+T endpoint path search
+
+Supervisor 0.4.0 adds an optional Workspace Symbol Provider for Spring Endpoint Mappings. Once Spring static data is available, press `Ctrl+T` and type a path containing `/`, for example:
+
+```text
+/admin-api/system/users
+```
+
+or:
+
+```text
+GET /admin-api/system/users
+```
+
+The provider asks Spring Boot Language Server for its `@/` mapping symbols, caches the result for 30 seconds, and filters it using the URL text. Disable this integration with:
+
+```json
+{
+  "springSupervisor.enableSlashEndpointWorkspaceSymbols": false
+}
+```
+
+This is additive: normal Java workspace symbols remain provided by the Java extension.
+
+## Automated releases
+
+GitHub Actions builds and tests the Supervisor on every push to `main`. It reads the version from `package.json` and creates a versioned GitHub Release when the corresponding tag does not exist.
+
+A separate workflow builds the patched Spring Boot Tools source and publishes its own Release with the VSIX, patch script, and SHA-256 checksums.
+
+## What the Supervisor does
+
+- Activates the Red Hat Java extension and observes its public `serverRunning`, `serverReady`, project-import, classpath-update, project-delete, server-mode, and workspace-initialized events.
+- Waits for `java.workspace.initialized`, not only `serverReady()`, before authorizing Spring startup.
 - Uses a configurable quiet period after Java import/classpath activity before considering the workspace stable.
-- Activates/starts Spring Boot Tools after that stable point when it has not already been activated elsewhere.
 - Refreshes the official Spring Boot Dashboard, Spring static data, and Logical Structure views after import settles.
-- Provides its own Spring Boot application tree that does not depend on the Spring Tools classpath-listener registration path.
+- Provides its own Spring Boot application tree that does not depend on Spring Tools classpath-listener registration.
 - Detects applications from Maven/Gradle build files and `@SpringBootApplication` main classes.
-- Optionally verifies each application's runtime classpath through the Red Hat Java API.
+- Skips expensive runtime classpath verification automatically in large workspaces.
 - Runs, debugs, and stops detected applications through the Java debug adapter.
 - Produces a diagnostic Markdown report with Java/Spring extension state, event timestamps, detected applications, warnings, and the last error.
 
 ## Important limitation
 
-VS Code does not expose an API that lets one extension prevent another extension from activating. Therefore this extension can control **its own** Spring Tools activation request and perform recovery after Java import settles, but it cannot guarantee that the official Dashboard or another extension did not activate Spring Boot Tools earlier.
-
-The independent **Applications** view is the fallback when the official Dashboard remains empty.
+VS Code does not expose an API that lets one extension prevent another extension from activating. The Supervisor can coordinate its own Spring startup request and perform recovery, but the root-fix VSIX is required to change Spring Boot Language Server's internal classpath-registration behavior.
 
 ## Requirements
 
@@ -93,37 +132,40 @@ Press `F5` in VS Code to launch an Extension Development Host.
 |---|---:|---|
 | `springSupervisor.quietPeriodMs` | `2500` | Stable window after import/classpath events |
 | `springSupervisor.maxMainClassFiles` | `5000` | Maximum likely main-class files scanned workspace-wide |
-| `springSupervisor.strictSpringStartGate` | `true` | Stop early Spring LS starts until Java settles |
-| `springSupervisor.activateSpringToolsAfterJavaReady` | `true` | Request Spring Tools activation after Java settles |
+| `springSupervisor.strictSpringStartGate` | `true` | Issue at most one early Spring LS stop; disable for the root-fix build |
+| `springSupervisor.waitForWorkspaceInitialized` | `true` | Wait for full Java workspace initialization |
+| `springSupervisor.workspaceInitializationTimeoutMs` | `180000` | Fallback if the Java event is not observed |
+| `springSupervisor.activateSpringToolsAfterJavaReady` | `true` | Request Spring Tools startup after Java settles |
 | `springSupervisor.refreshOfficialDashboardAfterSettle` | `true` | Refresh official Spring views after settling |
-| `springSupervisor.springRefreshDelayMs` | `5000` | Delay before refreshing official Spring views |
-| `springSupervisor.verifyRuntimeClasspath` | `false` | Optional classpath verification; slower on large workspaces |
-| `springSupervisor.defaultProfiles` | `[]` | Profiles used by supervisor Run/Debug |
-| `springSupervisor.vmArgs` | empty | Extra JVM arguments for supervisor launches |
+| `springSupervisor.springRefreshDelayMs` | `10000` | Delay before the first official Spring refresh |
+| `springSupervisor.springSecondRefreshDelayMs` | `15000` | Delay before the second recovery refresh |
+| `springSupervisor.verifyRuntimeClasspath` | `false` | Optional classpath verification; slow on large workspaces |
+| `springSupervisor.maxAutomaticClasspathVerifications` | `8` | Automatic verification limit |
+| `springSupervisor.enableSlashEndpointWorkspaceSymbols` | `true` | Add slash URL results to Ctrl+T |
+| `springSupervisor.defaultProfiles` | `[]` | Profiles used by Supervisor Run/Debug |
+| `springSupervisor.vmArgs` | empty | Extra JVM arguments for Supervisor launches |
 
 ## Architecture
 
 ```text
 Red Hat Java API
   ├─ serverRunning / serverReady
+  ├─ java.workspace.initialized
   ├─ onDidProjectsImport
-  ├─ onDidClasspathUpdate
-  └─ onDidServerModeChange
+  └─ onDidClasspathUpdate
               │
               ▼
       Java readiness gate
-      (quiet-period state machine)
               │
-       ┌──────┴─────────┐
-       ▼                ▼
-Independent app     Spring Tools activation
-scanner/dashboard   + official view refresh
+       ┌──────┼──────────────────┐
+       ▼      ▼                  ▼
+App scanner  Spring recovery   Ctrl+T endpoint provider
+             and refresh        via Spring @/ symbols
 ```
 
 ## Roadmap
 
-- Parse Maven reactor/module relationships and Gradle multi-project metadata.
-- Detect and classify known Spring/JDT LS timeout signatures from output logs.
-- Add targeted Maven/Gradle project reload actions.
+- Validate the root-fix build against the 64-project/881-dependency workspace.
+- Upstream the classpath-listener fix to `spring-projects/spring-tools` after field validation.
 - Add persisted per-application profiles, arguments, environment variables, and ports.
 - Add integration tests using `@vscode/test-electron`.
