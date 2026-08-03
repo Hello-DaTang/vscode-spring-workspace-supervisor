@@ -1,0 +1,46 @@
+name: Apply v0.2.0 Migration
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: apply-v020
+  cancel-in-progress: false
+
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Apply migration
+        run: node scripts/apply-v020.mjs
+      - name: Install dependencies
+        if: success()
+        run: npm install --no-audit --no-fund
+      - name: Validate extension
+        if: success()
+        run: npm test
+      - name: Commit migration
+        if: success()
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git diff --quiet; then
+            echo "No migration changes are required."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/supervisor.ts package.json README.md CHANGELOG.md
+          git commit -m "Release Spring Workspace Supervisor v0.2.0"
+          git push origin HEAD:main
