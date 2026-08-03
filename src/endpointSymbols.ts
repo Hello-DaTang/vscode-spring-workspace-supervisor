@@ -50,6 +50,16 @@ export class EndpointWorkspaceSymbolProvider implements vscode.WorkspaceSymbolPr
         if (!enabled || !isEndpointPathQuery(query) || token.isCancellationRequested) {
             return [];
         }
+        return this.search(query, token);
+    }
+
+    public async search(
+        query: string,
+        token: vscode.CancellationToken,
+    ): Promise<vscode.SymbolInformation[]> {
+        if (token.isCancellationRequested) {
+            return [];
+        }
 
         try {
             const symbols = await this.loadEndpointSymbols();
@@ -80,11 +90,18 @@ export class EndpointWorkspaceSymbolProvider implements vscode.WorkspaceSymbolPr
         }
 
         const extension = vscode.extensions.getExtension<SpringToolsApi>(SPRING_TOOLS_EXTENSION_ID);
-        if (!extension?.isActive || !extension.exports?.client) {
+        if (!extension) {
+            this.output.appendLine('[endpoint-symbols] Spring Boot Tools is not installed.');
             return [];
         }
 
-        this.requestInFlight = extension.exports.client
+        const api = extension.isActive ? extension.exports : await extension.activate();
+        if (!api?.client) {
+            this.output.appendLine('[endpoint-symbols] Spring Boot Tools API does not expose an active language client.');
+            return [];
+        }
+
+        this.requestInFlight = api.client
             .sendRequest<LspSymbolInformation[]>('workspace/symbol', { query: '@/' })
             .then((symbols) => {
                 const normalized = Array.isArray(symbols) ? symbols : [];
