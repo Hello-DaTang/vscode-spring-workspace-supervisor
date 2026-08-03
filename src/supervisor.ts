@@ -18,10 +18,12 @@ export class SpringWorkspaceSupervisor implements vscode.Disposable {
     private settleTimer: NodeJS.Timeout | undefined;
     private scanTimer: NodeJS.Timeout | undefined;
     private officialRefreshTimer: NodeJS.Timeout | undefined;
-    private strictGateTimer: NodeJS.Timeout | undefined;
-    private strictGateInFlight = false;
+    private earlyStopTimer: NodeJS.Timeout | undefined;
+    private workspaceInitializationTimer: NodeJS.Timeout | undefined;
+    private earlyStopAttempted = false;
     private springStartAuthorized = false;
-    private lastEarlyStopAt = 0;
+    private workspaceInitialized = false;
+    private workspaceInitializationTimedOut = false;
     private scanInProgress: Promise<void> | undefined;
     private pendingScanReason: string | undefined;
     private phase: SupervisorPhase = 'idle';
@@ -48,7 +50,7 @@ export class SpringWorkspaceSupervisor implements vscode.Disposable {
         this.output.appendLine(`[spring-gate] Spring Boot Tools active at supervisor startup: ${springTools?.isActive ?? false}.`);
         this.registerWorkspaceWatchers(context);
         this.registerDebugSessionTracking(context);
-        this.startStrictSpringGate(context);
+        this.armEarlySpringStop(context);
         this.setPhase('discovering');
 
         // Java readiness and independent application discovery must run concurrently.
@@ -109,9 +111,9 @@ export class SpringWorkspaceSupervisor implements vscode.Disposable {
     public async refreshOfficialDashboard(showMessage = true): Promise<void> {
         const commands = new Set(await vscode.commands.getCommands(true));
         const requested = [
-            'spring-boot-dashboard.refresh',
             'spring.staticData.refresh',
             'vscode-spring-boot.structure.refresh',
+            'spring-boot-dashboard.refresh',
         ];
         let executed = 0;
         for (const command of requested) {
@@ -184,8 +186,11 @@ export class SpringWorkspaceSupervisor implements vscode.Disposable {
         if (this.officialRefreshTimer) {
             clearTimeout(this.officialRefreshTimer);
         }
-        if (this.strictGateTimer) {
-            clearInterval(this.strictGateTimer);
+        if (this.earlyStopTimer) {
+            clearInterval(this.earlyStopTimer);
+        }
+        if (this.workspaceInitializationTimer) {
+            clearTimeout(this.workspaceInitializationTimer);
         }
         for (const disposable of this.disposables) {
             disposable.dispose();
@@ -228,7 +233,15 @@ export class SpringWorkspaceSupervisor implements vscode.Disposable {
             } else {
                 this.warnings.delete('Java Language Server is in LightWeight mode; classpath APIs are unavailable.');
             }
-            this.scheduleSettle('Java server ready');
+            this.armWorkspaceInitializationFallback();
+            if (this.shouldWaitForWorkspaceInitialized()) {
+                this.setPhase('projects-importing');
+                this.output.appendLine(
+                    '[gate] Java serverReady() completed; waiting for java.workspace.initialized before Spring startup.',
+                );
+            } else {
+                this.scheduleSettle('Java server ready');
+            }
         } catch (error) {
             this.recordError('Java extension activation failed', error);
         }
@@ -264,6 +277,15 @@ export class SpringWorkspaceSupervisor implements vscode.Disposable {
         }
         if (api.trackEvent) {
             this.disposables.push(api.trackEvent((event) => {
+                if (isJavaWorkspaceInitializedEvent(event) && !this.workspaceInitialized) {
+                    this.workspaceInitialized = true;
+                    if (this.workspaceInitializationTimer) {
+                        clearTimeout(this.workspaceInitializationTimer);
+                        this.workspaceInitializationTimer = undefined;
+                    }
+                    this.output.appendLine('[java] Workspace fully initialized (java.workspace.initialized).');
+                    this.scheduleSettle('Java workspace initialized');
+                }
                 const serialized = safeJson(event);
                 if (/error|exception|timeout/i.test(serialized)) {
                     this.output.appendLine(`[java-event] ${serialized}`);
@@ -308,6 +330,14 @@ export class SpringWorkspaceSupervisor implements vscode.Disposable {
     }
 
     private scheduleSettle(reason: string): void {
+        if (this.shouldWaitForWorkspaceInitialized()
+            && !this.workspaceInitialized
+            && !this.workspaceInitializationTimedOut) {
+            this.output.appendLine(
+                `[gate] Deferred workspace settlement until java.workspace.initialized: ${reason}.`,
+            );
+            return;
+        }
         if (this.settleTimer) {
             clearTimeout(this.settleTimer);
         }
@@ -329,12 +359,19 @@ export class SpringWorkspaceSupervisor implements vscode.Disposable {
                 this.setPhase('projects-importing');
                 return;
             }
+            if (this.shouldWaitForWorkspaceInitialized()
+                && !this.workspaceInitialized
+                && !this.workspaceInitializationTimedOut) {
+                this.setPhase('projects-importing');
+                this.output.appendLine('[gate] Spring startup remains blocked until Java workspace initialization completes.');
+                return;
+            }
 
             this.settledAt = Date.now();
             this.springStartAuthorized = true;
-            if (this.strictGateTimer) {
-                clearInterval(this.strictGateTimer);
-                this.strictGateTimer = undefined;
+            if (this.earlyStopTimer) {
+                clearInterval(this.earlyStopTimer);
+                this.earlyStopTimer = undefined;
             }
             this.output.appendLine(`[gate] Workspace settled after: ${reason}.`);
 
@@ -388,71 +425,112 @@ export class SpringWorkspaceSupervisor implements vscode.Disposable {
         }
     }
 
-    private startStrictSpringGate(context: vscode.ExtensionContext): void {
+    private armEarlySpringStop(context: vscode.ExtensionContext): void {
         const enabled = vscode.workspace.getConfiguration('springSupervisor')
             .get<boolean>('strictSpringStartGate', true);
         if (!enabled) {
-            this.output.appendLine('[spring-gate] Strict start gate is disabled.');
+            this.output.appendLine('[spring-gate] One-shot early Spring stop is disabled.');
             return;
         }
 
-        this.output.appendLine('[spring-gate] Strict start gate enabled; early Spring LS starts will be stopped until Java settles.');
-        this.strictGateTimer = setInterval(() => {
-            void this.enforceStrictSpringGate();
-        }, 750);
+        this.output.appendLine(
+            '[spring-gate] One-shot gate armed; an early Spring LS will be stopped at most once.',
+        );
+        let attemptsRemaining = 120;
+        this.earlyStopTimer = setInterval(() => {
+            if (this.springStartAuthorized || this.workspaceInitialized || this.earlyStopAttempted || attemptsRemaining <= 0) {
+                if (this.earlyStopTimer) {
+                    clearInterval(this.earlyStopTimer);
+                    this.earlyStopTimer = undefined;
+                }
+                return;
+            }
+            attemptsRemaining -= 1;
+            void this.tryStopEarlySpringOnce();
+        }, 500);
         context.subscriptions.push({ dispose: () => {
-            if (this.strictGateTimer) {
-                clearInterval(this.strictGateTimer);
-                this.strictGateTimer = undefined;
+            if (this.earlyStopTimer) {
+                clearInterval(this.earlyStopTimer);
+                this.earlyStopTimer = undefined;
             }
         }});
-        void this.enforceStrictSpringGate();
+        void this.tryStopEarlySpringOnce();
     }
 
-    private async enforceStrictSpringGate(): Promise<void> {
-        if (this.springStartAuthorized || this.strictGateInFlight) {
+    private async tryStopEarlySpringOnce(): Promise<void> {
+        if (this.springStartAuthorized || this.workspaceInitialized || this.earlyStopAttempted) {
             return;
         }
         const springTools = vscode.extensions.getExtension(SPRING_TOOLS_EXTENSION_ID);
         if (!springTools?.isActive) {
             return;
         }
-        const now = Date.now();
-        if (now - this.lastEarlyStopAt < 2500) {
-            return;
-        }
-
         const commands = new Set(await vscode.commands.getCommands(true));
         if (!commands.has('vscode-spring-boot.ls.stop')) {
             return;
         }
 
-        this.strictGateInFlight = true;
+        // Mark before awaiting: this command must never be sent repeatedly while the
+        // language client is tearing down its streams.
+        this.earlyStopAttempted = true;
         try {
             await vscode.commands.executeCommand('vscode-spring-boot.ls.stop');
-            this.lastEarlyStopAt = Date.now();
             this.warnings.add(
-                'Spring Boot Tools attempted to activate before Java settled; the supervisor stopped its language server and will restart it later.',
+                'Spring Boot Tools started before Java workspace initialization; one graceful stop was issued.',
             );
-            this.output.appendLine('[spring-gate] Stopped an early Spring Boot Language Server start.');
+            this.output.appendLine('[spring-gate] Issued the one allowed early Spring LS stop.');
             this.emitHealth();
         } catch (error) {
-            this.output.appendLine(`[spring-gate] Early stop attempt failed: ${toErrorMessage(error)}`);
-        } finally {
-            this.strictGateInFlight = false;
+            this.output.appendLine(`[spring-gate] One-shot early stop failed: ${toErrorMessage(error)}`);
         }
+    }
+
+    private shouldWaitForWorkspaceInitialized(): boolean {
+        return vscode.workspace.getConfiguration('springSupervisor')
+            .get<boolean>('waitForWorkspaceInitialized', true);
+    }
+
+    private armWorkspaceInitializationFallback(): void {
+        if (!this.shouldWaitForWorkspaceInitialized() || this.workspaceInitialized || this.workspaceInitializationTimer) {
+            return;
+        }
+        const timeout = vscode.workspace.getConfiguration('springSupervisor')
+            .get<number>('workspaceInitializationTimeoutMs', 180000);
+        this.output.appendLine(`[gate] Workspace initialization fallback timeout armed for ${timeout}ms.`);
+        this.workspaceInitializationTimer = setTimeout(() => {
+            this.workspaceInitializationTimer = undefined;
+            if (this.workspaceInitialized) {
+                return;
+            }
+            this.workspaceInitializationTimedOut = true;
+            this.warnings.add(
+                'java.workspace.initialized was not observed before the fallback timeout; Spring startup continued cautiously.',
+            );
+            this.output.appendLine('[gate] Workspace initialization fallback timeout reached.');
+            this.scheduleSettle('workspace initialization fallback timeout');
+        }, timeout);
     }
 
     private scheduleOfficialRefresh(): void {
         if (this.officialRefreshTimer) {
             clearTimeout(this.officialRefreshTimer);
         }
-        const delay = vscode.workspace.getConfiguration('springSupervisor')
-            .get<number>('springRefreshDelayMs', 5000);
+        const configuration = vscode.workspace.getConfiguration('springSupervisor');
+        const delay = configuration.get<number>('springRefreshDelayMs', 10000);
+        const secondDelay = configuration.get<number>('springSecondRefreshDelayMs', 15000);
         this.output.appendLine(`[spring] Waiting ${delay}ms before refreshing official Spring views.`);
         this.officialRefreshTimer = setTimeout(() => {
             this.officialRefreshTimer = undefined;
-            void this.refreshOfficialDashboard(false);
+            void this.refreshOfficialDashboard(false).finally(() => {
+                if (secondDelay <= 0) {
+                    return;
+                }
+                this.output.appendLine(`[spring] Scheduling a second recovery refresh in ${secondDelay}ms.`);
+                this.officialRefreshTimer = setTimeout(() => {
+                    this.officialRefreshTimer = undefined;
+                    void this.refreshOfficialDashboard(false);
+                }, secondDelay);
+            });
         }, delay);
     }
 
@@ -654,4 +732,12 @@ function yesNo(value: boolean): string {
 
 function formatTime(value: number | undefined): string {
     return value ? new Date(value).toISOString() : 'never';
+}
+
+function isJavaWorkspaceInitializedEvent(value: unknown): boolean {
+    if (!value || typeof value !== 'object') {
+        return false;
+    }
+    const name = (value as { readonly name?: unknown }).name;
+    return name === 'java.workspace.initialized';
 }

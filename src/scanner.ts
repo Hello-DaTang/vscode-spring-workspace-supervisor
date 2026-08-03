@@ -90,10 +90,20 @@ export class WorkspaceScanner {
         const deduplicated = deduplicateApplications(applications)
             .sort((left, right) => left.name.localeCompare(right.name));
 
-        const verifyClasspath = vscode.workspace.getConfiguration('springSupervisor')
-            .get<boolean>('verifyRuntimeClasspath', false);
+        const configuration = vscode.workspace.getConfiguration('springSupervisor');
+        const verifyClasspath = configuration.get<boolean>('verifyRuntimeClasspath', false);
+        const verificationLimit = configuration.get<number>('maxAutomaticClasspathVerifications', 8);
         const getClasspaths = javaApi?.getClasspaths;
-        if (javaReady && verifyClasspath && getClasspaths) {
+        if (verifyClasspath && deduplicated.length > verificationLimit) {
+            this.output.appendLine(
+                `[scanner] Skipped runtime classpath verification for ${deduplicated.length} applications; `
+                + `the configured automatic limit is ${verificationLimit}.`,
+            );
+        }
+        if (javaReady
+            && verifyClasspath
+            && getClasspaths
+            && deduplicated.length <= verificationLimit) {
             const indexed = deduplicated.map((application, index) => ({ application, index }));
             await runWithConcurrency(indexed, CLASSPATH_LOOKUP_CONCURRENCY, async ({ application, index }) => {
                 if (!application.mainFile || !application.mainClass) {

@@ -1,5 +1,12 @@
 # Change Log
 
+## 0.3.0
+
+- Wait for the Java `java.workspace.initialized` signal instead of treating `serverReady()` as full project readiness.
+- Replace the repeated Spring LS stop loop with a one-shot graceful stop to prevent destroyed-stream restart loops.
+- Skip expensive runtime classpath verification automatically in large workspaces.
+- Refresh Spring static data before the Dashboard and perform a delayed second recovery refresh.
+
 ## 0.2.0
 
 - Added a strict Spring start gate. If Spring Boot Tools is activated while Java is still importing, the supervisor stops its language server and restarts it after the Java workspace settles.

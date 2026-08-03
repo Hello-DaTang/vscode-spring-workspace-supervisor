@@ -2,7 +2,7 @@
   "name": "vscode-spring-workspace-supervisor",
   "displayName": "Spring Workspace Supervisor",
   "description": "Coordinates Java project import, repairs Spring tooling refreshes, and provides a resilient Spring Boot application dashboard.",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "publisher": "hello-datang",
   "license": "MIT",
   "repository": {
@@ -204,7 +204,7 @@
         "springSupervisor.strictSpringStartGate": {
           "type": "boolean",
           "default": true,
-          "description": "While Java is importing, repeatedly stop an early Spring Boot Language Server start and restart it only after the Java workspace settles."
+          "description": "Attempt one graceful stop if Spring Boot Language Server starts before the Java workspace is fully initialized. The stop is issued at most once to avoid restart loops."
         },
         "springSupervisor.activateSpringToolsAfterJavaReady": {
           "type": "boolean",
@@ -218,10 +218,10 @@
         },
         "springSupervisor.springRefreshDelayMs": {
           "type": "number",
-          "default": 5000,
-          "minimum": 0,
-          "maximum": 60000,
-          "description": "Delay after starting Spring Boot Tools before refreshing official Spring views."
+          "default": 10000,
+          "minimum": 1000,
+          "maximum": 120000,
+          "description": "Delay after Spring Boot Language Server startup before the first Beans, Endpoint Mappings, Logical Structure, and Dashboard refresh."
         },
         "springSupervisor.verifyRuntimeClasspath": {
           "type": "boolean",
@@ -240,6 +240,32 @@
           "type": "string",
           "default": "",
           "description": "Additional JVM arguments used when launching applications from the supervisor."
+        },
+        "springSupervisor.waitForWorkspaceInitialized": {
+          "type": "boolean",
+          "default": true,
+          "description": "Wait for the Red Hat Java java.workspace.initialized telemetry event, not only serverReady(), before starting Spring Boot Language Server."
+        },
+        "springSupervisor.workspaceInitializationTimeoutMs": {
+          "type": "number",
+          "default": 180000,
+          "minimum": 30000,
+          "maximum": 600000,
+          "description": "Fallback timeout while waiting for java.workspace.initialized. Spring startup is allowed after this timeout with a warning."
+        },
+        "springSupervisor.maxAutomaticClasspathVerifications": {
+          "type": "number",
+          "default": 8,
+          "minimum": 0,
+          "maximum": 100,
+          "description": "Maximum detected applications for which automatic runtime classpath verification is allowed. Large workspaces skip the expensive JDT requests."
+        },
+        "springSupervisor.springSecondRefreshDelayMs": {
+          "type": "number",
+          "default": 15000,
+          "minimum": 0,
+          "maximum": 120000,
+          "description": "Delay after the first Spring refresh before a second recovery refresh. Set to 0 to disable the second pass."
         }
       }
     }
