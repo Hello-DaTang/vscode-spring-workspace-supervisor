@@ -7,6 +7,7 @@ import {
     isSpringBuildText,
     parseSpringBootMainClass,
 } from '../detection';
+import { isEndpointPathQuery, matchesEndpointSymbol } from '../endpointQuery';
 
 test('detects Spring Boot build markers', () => {
     assert.equal(isSpringBuildText('<artifactId>spring-boot-starter-web</artifactId>'), true);
@@ -50,4 +51,25 @@ test('verifies Spring dependencies in Windows and Unix classpaths', () => {
     assert.equal(containsSpringRuntimeClasspath([
         '/home/demo/.m2/repository/org/example/plain-library-1.0.jar',
     ]), false);
+});
+
+test('recognizes slash-based endpoint workspace symbol queries', () => {
+    assert.equal(isEndpointPathQuery('/admin-api/system/users'), true);
+    assert.equal(isEndpointPathQuery('GET /admin-api/system/users'), true);
+    assert.equal(isEndpointPathQuery('SystemController'), false);
+});
+
+test('matches endpoint symbols while preserving slash input', () => {
+    assert.equal(
+        matchesEndpointSymbol('/admin-api/system/users', 'GET /admin-api/system/users', 'UserController'),
+        true,
+    );
+    assert.equal(
+        matchesEndpointSymbol('/system/users', 'GET admin-api/system/users', 'UserController'),
+        true,
+    );
+    assert.equal(
+        matchesEndpointSymbol('/trade/orders', 'GET /system/users', 'UserController'),
+        false,
+    );
 });
