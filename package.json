@@ -2,7 +2,7 @@
   "name": "vscode-spring-workspace-supervisor",
   "displayName": "Spring Workspace Supervisor",
   "description": "Coordinates Java project import, repairs Spring tooling refreshes, and provides a resilient Spring Boot application dashboard.",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "publisher": "hello-datang",
   "license": "MIT",
   "repository": {
@@ -204,7 +204,7 @@
         "springSupervisor.strictSpringStartGate": {
           "type": "boolean",
           "default": true,
-          "description": "Attempt one graceful stop if Spring Boot Language Server starts before the Java workspace is fully initialized. The stop is issued at most once to avoid restart loops."
+          "description": "Attempt one graceful stop if the official Spring Boot Language Server starts before Java initialization. Automatically bypassed for the Root-Fix backpressure build."
         },
         "springSupervisor.activateSpringToolsAfterJavaReady": {
           "type": "boolean",

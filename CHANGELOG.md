@@ -1,5 +1,11 @@
 # Change Log
 
+## 0.4.1
+
+- Detect the Spring Boot Tools Root-Fix backpressure build through its extension manifest.
+- Bypass the one-shot early-stop gate for that build so its initial JDT classpath snapshot is never cancelled.
+- Preserve an already-active Root-Fix registration without reporting the normal early-activation warning.
+
 ## 0.4.0
 
 - Added an optional slash-aware Workspace Symbol Provider for `Ctrl+T` endpoint searches.

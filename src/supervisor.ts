@@ -403,10 +403,22 @@ export class SpringWorkspaceSupervisor implements vscode.Disposable {
         this.warnings.delete('Spring Boot Tools is not installed; the supervisor dashboard remains available.');
         this.setPhase('spring-starting');
         if (springTools.isActive) {
-            this.output.appendLine('[spring] Spring Boot Tools was already active when the workspace settled.');
-            this.warnings.add(
-                'Spring Boot Tools activated before the supervisor authorized startup. Another extension or activation event bypassed the gate.',
-            );
+            const packageJson = springTools.packageJSON as {
+                readonly rootFixBuild?: { readonly patch?: unknown };
+            };
+            if (packageJson.rootFixBuild?.patch === 'classpath-listener-backpressure-v2') {
+                this.output.appendLine(
+                    '[spring] Root-Fix backpressure build is active; preserving its in-flight classpath snapshot.',
+                );
+                this.warnings.delete(
+                    'Spring Boot Tools activated before the supervisor authorized startup. Another extension or activation event bypassed the gate.',
+                );
+            } else {
+                this.output.appendLine('[spring] Spring Boot Tools was already active when the workspace settled.');
+                this.warnings.add(
+                    'Spring Boot Tools activated before the supervisor authorized startup. Another extension or activation event bypassed the gate.',
+                );
+            }
         } else {
             await springTools.activate();
             this.output.appendLine('[spring] Activated Spring Boot Tools after Java workspace settlement.');
@@ -426,6 +438,17 @@ export class SpringWorkspaceSupervisor implements vscode.Disposable {
     }
 
     private armEarlySpringStop(context: vscode.ExtensionContext): void {
+        const springTools = vscode.extensions.getExtension(SPRING_TOOLS_EXTENSION_ID);
+        const packageJson = springTools?.packageJSON as {
+            readonly rootFixBuild?: { readonly patch?: unknown };
+        } | undefined;
+        if (packageJson?.rootFixBuild?.patch === 'classpath-listener-backpressure-v2') {
+            this.output.appendLine(
+                '[spring-gate] Root-Fix backpressure build detected; early-stop gate is bypassed.',
+            );
+            return;
+        }
+
         const enabled = vscode.workspace.getConfiguration('springSupervisor')
             .get<boolean>('strictSpringStartGate', true);
         if (!enabled) {
