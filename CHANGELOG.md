@@ -1,5 +1,12 @@
 # Change Log
 
+## 0.5.1
+
+- Remove the temporary custom Ctrl+T command and keybinding introduced by 0.5.0.
+- Restore VS Code's native Ctrl+T behavior without any shortcut override.
+- Keep only the standard WorkspaceSymbolProvider integration for Spring Endpoint Mapping URL queries.
+- Activate Spring Boot Tools on demand before requesting endpoint symbols and emit diagnostic output for empty/unavailable results.
+
 ## 0.4.2
 
 - Keep VS Code's native Ctrl+T command and keybinding unchanged.

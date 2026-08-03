@@ -2,7 +2,7 @@
   "name": "vscode-spring-workspace-supervisor",
   "displayName": "Spring Workspace Supervisor",
   "description": "Coordinates Java project import, repairs Spring tooling refreshes, and provides a resilient Spring Boot application dashboard.",
-  "version": "0.4.2",
+  "version": "0.5.1",
   "publisher": "hello-datang",
   "license": "MIT",
   "repository": {
@@ -81,12 +81,6 @@
       }
     ],
     "commands": [
-      {
-        "command": "springSupervisor.goToSymbolOrEndpoint",
-        "title": "Go to Workspace Symbol / Spring Endpoint",
-        "category": "Spring Supervisor",
-        "icon": "$(symbol-method)"
-      },
       {
         "command": "springSupervisor.refresh",
         "title": "Refresh Workspace",
@@ -276,23 +270,10 @@
         "springSupervisor.enableSlashEndpointWorkspaceSymbols": {
           "type": "boolean",
           "default": true,
-          "description": "Contribute Spring Endpoint Mapping results to VS Code native Ctrl+T workspace-symbol search when the query contains /. This does not replace or rebind Ctrl+T."
-        },
-        "springSupervisor.overrideCtrlT": {
-          "type": "boolean",
-          "default": true,
-          "description": "Replace the native Ctrl+T workspace-symbol picker with a compatible picker that preserves normal symbol search and switches to Spring Endpoint Mapping search when the query contains /. Disable this setting to restore the native Ctrl+T binding."
+          "description": "Contribute Spring Endpoint Mapping results to VS Code native Ctrl+T workspace-symbol search when the query contains /. This extension does not replace or rebind Ctrl+T."
         }
       }
-    },
-    "keybindings": [
-      {
-        "command": "springSupervisor.goToSymbolOrEndpoint",
-        "key": "ctrl+t",
-        "mac": "cmd+t",
-        "when": "springSupervisor.ctrlTEnabled"
-      }
-    ]
+    }
   },
   "scripts": {
     "clean": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\"",

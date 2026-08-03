@@ -78,22 +78,9 @@ The provider asks Spring Boot Language Server for its `@/` mapping symbols, cach
 
 This is additive: normal Java workspace symbols remain provided by the Java extension.
 
-## Ctrl+T endpoint search
-
-Version 0.5.0 replaces the native Ctrl+T workspace-symbol picker with a compatible picker. Normal text continues to search ordinary workspace symbols. As soon as the query contains a forward slash, the picker searches Spring Endpoint Mappings instead.
-
-Examples:
-
-```text
-/admin-api/system/users
-GET /admin-api/system/users
-```
-
-Set `springSupervisor.overrideCtrlT` to `false` to restore VS Code's native Ctrl+T binding. The command remains available as **Spring Supervisor: Go to Workspace Symbol / Spring Endpoint**.
-
 ## Native Ctrl+T endpoint search
 
-Version 0.4.2 does not replace or rebind Ctrl+T. It registers a standard VS Code Workspace Symbol Provider. When the native Ctrl+T query contains a forward slash, the provider requests Spring Endpoint Mappings and contributes matching results to the normal symbol picker.
+The extension does not replace or rebind Ctrl+T. It registers a standard VS Code Workspace Symbol Provider. When the native Ctrl+T query contains a forward slash, the provider requests Spring Endpoint Mappings and contributes matching results to the normal symbol picker.
 
 Examples:
 
