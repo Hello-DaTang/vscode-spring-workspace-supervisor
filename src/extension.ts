@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { EndpointWorkspaceSymbolProvider } from './endpointSymbols';
 import { SpringWorkspaceSupervisor } from './supervisor';
 import { ApplicationTreeItem, ApplicationsTreeProvider, HealthTreeProvider } from './tree';
 import type { SpringBootApplication } from './types';
@@ -6,6 +7,7 @@ import type { SpringBootApplication } from './types';
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
     const output = vscode.window.createOutputChannel('Spring Workspace Supervisor', { log: true });
     const supervisor = new SpringWorkspaceSupervisor(output);
+    const endpointSymbols = new EndpointWorkspaceSymbolProvider(output);
     const healthProvider = new HealthTreeProvider(supervisor.getHealth());
     const applicationsProvider = new ApplicationsTreeProvider();
     const statusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 50);
@@ -19,6 +21,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         healthProvider,
         applicationsProvider,
         statusBar,
+        vscode.languages.registerWorkspaceSymbolProvider(endpointSymbols),
         vscode.window.registerTreeDataProvider('springSupervisor.health', healthProvider),
         vscode.window.registerTreeDataProvider('springSupervisor.apps', applicationsProvider),
         supervisor.onDidChangeHealth((health) => {
@@ -26,12 +29,18 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             updateStatusBar(statusBar, health.phase, health.applicationCount, health.lastError);
         }),
         supervisor.onDidChangeApplications((applications) => applicationsProvider.update(applications)),
-        vscode.commands.registerCommand('springSupervisor.refresh', () => supervisor.refresh()),
+        vscode.commands.registerCommand('springSupervisor.refresh', async () => {
+            endpointSymbols.clearCache();
+            await supervisor.refresh();
+        }),
         vscode.commands.registerCommand('springSupervisor.diagnose', () => supervisor.openDiagnosticReport()),
         vscode.commands.registerCommand('springSupervisor.retrySpringIndex', () => supervisor.retrySpringIndex()),
         vscode.commands.registerCommand(
             'springSupervisor.refreshOfficialDashboard',
-            () => supervisor.refreshOfficialDashboard(true),
+            async () => {
+                endpointSymbols.clearCache();
+                await supervisor.refreshOfficialDashboard(true);
+            },
         ),
         vscode.commands.registerCommand('springSupervisor.showLog', () => output.show(true)),
         vscode.commands.registerCommand('springSupervisor.runApp', (value: unknown) => {
