@@ -1,0 +1,249 @@
+{
+  "name": "vscode-spring-workspace-supervisor",
+  "displayName": "Spring Workspace Supervisor",
+  "description": "Coordinates Java project import, repairs Spring tooling refreshes, and provides a resilient Spring Boot application dashboard.",
+  "version": "0.1.0",
+  "publisher": "hello-datang",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Hello-DaTang/vscode-spring-workspace-supervisor.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Hello-DaTang/vscode-spring-workspace-supervisor/issues"
+  },
+  "homepage": "https://github.com/Hello-DaTang/vscode-spring-workspace-supervisor#readme",
+  "engines": {
+    "vscode": "^1.96.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Debuggers",
+    "Other"
+  ],
+  "keywords": [
+    "spring",
+    "spring boot",
+    "java",
+    "dashboard",
+    "language server",
+    "maven",
+    "gradle"
+  ],
+  "extensionKind": [
+    "workspace"
+  ],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": false,
+      "description": "The extension scans and can launch Java projects from the workspace."
+    },
+    "virtualWorkspaces": false
+  },
+  "activationEvents": [
+    "onStartupFinished",
+    "workspaceContains:**/pom.xml",
+    "workspaceContains:**/build.gradle",
+    "workspaceContains:**/build.gradle.kts",
+    "onView:springSupervisor.health",
+    "onView:springSupervisor.apps"
+  ],
+  "main": "./dist/extension.js",
+  "extensionDependencies": [
+    "redhat.java"
+  ],
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "springSupervisor",
+          "title": "Spring Supervisor",
+          "icon": "resources/spring-supervisor.svg"
+        }
+      ]
+    },
+    "views": {
+      "springSupervisor": [
+        {
+          "id": "springSupervisor.health",
+          "name": "Workspace Health"
+        },
+        {
+          "id": "springSupervisor.apps",
+          "name": "Applications"
+        }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "springSupervisor.apps",
+        "contents": "No Spring Boot applications detected.\n[Refresh Workspace](command:springSupervisor.refresh)"
+      }
+    ],
+    "commands": [
+      {
+        "command": "springSupervisor.refresh",
+        "title": "Refresh Workspace",
+        "category": "Spring Supervisor",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "springSupervisor.diagnose",
+        "title": "Open Diagnostic Report",
+        "category": "Spring Supervisor",
+        "icon": "$(pulse)"
+      },
+      {
+        "command": "springSupervisor.retrySpringIndex",
+        "title": "Retry Spring Index",
+        "category": "Spring Supervisor",
+        "icon": "$(sync)"
+      },
+      {
+        "command": "springSupervisor.refreshOfficialDashboard",
+        "title": "Refresh Official Spring Dashboard",
+        "category": "Spring Supervisor"
+      },
+      {
+        "command": "springSupervisor.showLog",
+        "title": "Show Supervisor Log",
+        "category": "Spring Supervisor"
+      },
+      {
+        "command": "springSupervisor.runApp",
+        "title": "Run",
+        "category": "Spring Supervisor",
+        "icon": "$(play)"
+      },
+      {
+        "command": "springSupervisor.debugApp",
+        "title": "Debug",
+        "category": "Spring Supervisor",
+        "icon": "$(debug-alt-small)"
+      },
+      {
+        "command": "springSupervisor.stopApp",
+        "title": "Stop",
+        "category": "Spring Supervisor",
+        "icon": "$(debug-stop)"
+      },
+      {
+        "command": "springSupervisor.openBuildFile",
+        "title": "Open Build File",
+        "category": "Spring Supervisor"
+      },
+      {
+        "command": "springSupervisor.openMainClass",
+        "title": "Open Main Class",
+        "category": "Spring Supervisor"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "springSupervisor.refresh",
+          "when": "view == springSupervisor.health || view == springSupervisor.apps",
+          "group": "navigation@1"
+        },
+        {
+          "command": "springSupervisor.diagnose",
+          "when": "view == springSupervisor.health",
+          "group": "navigation@2"
+        },
+        {
+          "command": "springSupervisor.retrySpringIndex",
+          "when": "view == springSupervisor.health",
+          "group": "navigation@3"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "springSupervisor.runApp",
+          "when": "view == springSupervisor.apps && viewItem == springSupervisor.app.ready",
+          "group": "inline@1"
+        },
+        {
+          "command": "springSupervisor.debugApp",
+          "when": "view == springSupervisor.apps && viewItem == springSupervisor.app.ready",
+          "group": "inline@2"
+        },
+        {
+          "command": "springSupervisor.stopApp",
+          "when": "view == springSupervisor.apps && viewItem == springSupervisor.app.running",
+          "group": "inline@1"
+        },
+        {
+          "command": "springSupervisor.openMainClass",
+          "when": "view == springSupervisor.apps && (viewItem == springSupervisor.app.ready || viewItem == springSupervisor.app.running)",
+          "group": "navigation@10"
+        },
+        {
+          "command": "springSupervisor.openBuildFile",
+          "when": "view == springSupervisor.apps",
+          "group": "navigation@11"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Spring Workspace Supervisor",
+      "properties": {
+        "springSupervisor.quietPeriodMs": {
+          "type": "number",
+          "default": 2500,
+          "minimum": 500,
+          "maximum": 30000,
+          "description": "How long Java project import and classpath events must stay quiet before the workspace is considered settled."
+        },
+        "springSupervisor.maxJavaFilesPerProject": {
+          "type": "number",
+          "default": 2000,
+          "minimum": 50,
+          "maximum": 20000,
+          "description": "Maximum number of Java source files scanned in one project when locating Spring Boot main classes."
+        },
+        "springSupervisor.activateSpringToolsAfterJavaReady": {
+          "type": "boolean",
+          "default": true,
+          "description": "Activate and start Spring Boot Tools only after the Java workspace has reached a stable state. This cannot stop another extension from activating Spring Tools earlier."
+        },
+        "springSupervisor.refreshOfficialDashboardAfterSettle": {
+          "type": "boolean",
+          "default": true,
+          "description": "Refresh the official Spring Boot Dashboard and Spring static data after Java project import settles."
+        },
+        "springSupervisor.verifyRuntimeClasspath": {
+          "type": "boolean",
+          "default": true,
+          "description": "Ask the Red Hat Java extension for each detected application's runtime classpath to verify Spring Boot dependencies."
+        },
+        "springSupervisor.defaultProfiles": {
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "string"
+          },
+          "description": "Spring profiles added when launching an application from the supervisor."
+        },
+        "springSupervisor.vmArgs": {
+          "type": "string",
+          "default": "",
+          "description": "Additional JVM arguments used when launching applications from the supervisor."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "clean": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\"",
+    "compile": "npm run clean && tsc -p tsconfig.json",
+    "watch": "tsc -w -p tsconfig.json",
+    "check": "tsc -p tsconfig.json --noEmit",
+    "test": "npm run compile && node --test dist/test/detection.test.js",
+    "package": "npm run test && vsce package --no-dependencies"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.0",
+    "@types/vscode": "^1.96.0",
+    "@vscode/vsce": "^3.5.0",
+    "typescript": "^5.8.3"
+  }
+}
