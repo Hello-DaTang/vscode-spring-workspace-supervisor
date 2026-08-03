@@ -27,16 +27,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: '21'
-          cache: maven
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-
       - name: Fetch pinned Spring Tools source
         shell: bash
         run: |
@@ -45,6 +35,17 @@ jobs:
           git -C spring-tools remote add origin https://github.com/spring-projects/spring-tools.git
           git -C spring-tools fetch --depth 1 origin "$UPSTREAM_COMMIT"
           git -C spring-tools checkout --detach FETCH_HEAD
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+          cache-dependency-path: 'spring-tools/**/pom.xml'
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
 
       - name: Apply audited root-fix patch
         run: python3 scripts/apply-spring-tools-root-fix.py spring-tools
@@ -105,7 +106,7 @@ jobs:
           cat > release-notes.md <<'EOF'
           ## Unofficial Spring Boot Tools root-fix build
 
-          This VSIX is built from the pinned upstream `spring-projects/spring-tools` source and retains the extension ID `vmware.vscode-spring-boot` so that the official Spring Boot Dashboard dependency continues to work.
+          This VSIX is built from the pinned `spring-projects/spring-tools` source and retains the extension ID `vmware.vscode-spring-boot`, so the official Spring Boot Dashboard dependency continues to work.
 
           Root-fix changes:
 
