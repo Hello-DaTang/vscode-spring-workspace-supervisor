@@ -1,5 +1,12 @@
 # Change Log
 
+## 0.5.0
+
+- Replace the native Ctrl+T picker with a compatible workspace-symbol picker that supports URL paths containing forward slashes.
+- Preserve ordinary class, method, and workspace-symbol search when the query does not contain a slash.
+- Query Spring Boot Language Server directly with @/ for Endpoint Mappings and bypass VS Code's second fuzzy-filter pass for URL results.
+- Add springSupervisor.overrideCtrlT so the custom binding can be disabled and the native Ctrl+T restored.
+
 ## 0.4.1
 
 - Detect the Spring Boot Tools Root-Fix backpressure build through its extension manifest.
