@@ -2,7 +2,7 @@
   "name": "vscode-spring-workspace-supervisor",
   "displayName": "Spring Workspace Supervisor",
   "description": "Coordinates Java project import, repairs Spring tooling refreshes, and provides a resilient Spring Boot application dashboard.",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "publisher": "hello-datang",
   "license": "MIT",
   "repository": {
@@ -266,6 +266,11 @@
           "minimum": 0,
           "maximum": 120000,
           "description": "Delay after the first Spring refresh before a second recovery refresh. Set to 0 to disable the second pass."
+        },
+        "springSupervisor.enableSlashEndpointWorkspaceSymbols": {
+          "type": "boolean",
+          "default": true,
+          "description": "Add Spring Endpoint Mapping results to Ctrl+T workspace symbol search when the query contains a forward slash."
         }
       }
     }
