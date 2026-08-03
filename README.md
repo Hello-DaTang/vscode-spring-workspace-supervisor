@@ -4,6 +4,45 @@ A resilient VS Code companion for large Maven/Gradle Spring Boot workspaces.
 
 The extension addresses a recurring failure mode in which Spring Boot Tools or the official Spring Boot Dashboard starts while the Red Hat Java Language Server is still importing projects. In that state, classpath-listener registration may time out and the official Dashboard can remain empty even though the projects are valid.
 
+## Install
+
+Download the latest `.vsix` package from the repository **Releases** page. The asset is named like:
+
+```text
+spring-workspace-supervisor-v0.1.0.vsix
+```
+
+Install it in VS Code using either method:
+
+1. Open **Extensions**.
+2. Select the `...` menu.
+3. Select **Install from VSIX...**.
+4. Choose the downloaded file.
+
+Or run:
+
+```bash
+code --install-extension spring-workspace-supervisor-v0.1.0.vsix
+```
+
+Reload VS Code after installation. The **Spring Supervisor** activity-bar entry will appear when a Java/Spring workspace is opened.
+
+## Automated releases
+
+GitHub Actions builds and tests the extension on every push to `main`. It reads the version from `package.json` and creates a GitHub Release when the corresponding tag does not already exist.
+
+For example:
+
+```json
+{
+  "version": "0.2.0"
+}
+```
+
+After that version is pushed to `main`, Actions publishes tag `v0.2.0` and attaches `spring-workspace-supervisor-v0.2.0.vsix`.
+
+A version is published only once. Increase `package.json` version before publishing another release.
+
 ## What the MVP does
 
 - Activates the Red Hat Java extension and observes its public `serverRunning`, `serverReady`, project-import, classpath-update, project-delete, and server-mode events.
