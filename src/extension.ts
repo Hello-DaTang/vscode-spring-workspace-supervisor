@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { EndpointWorkspaceSymbolProvider } from './endpointSymbols';
 import { SpringWorkspaceSupervisor } from './supervisor';
+import { SlashAwareWorkspaceSymbolQuickPick } from './symbolQuickPick';
 import { ApplicationTreeItem, ApplicationsTreeProvider, HealthTreeProvider } from './tree';
 import type { SpringBootApplication } from './types';
 
@@ -8,6 +9,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     const output = vscode.window.createOutputChannel('Spring Workspace Supervisor', { log: true });
     const supervisor = new SpringWorkspaceSupervisor(output);
     const endpointSymbols = new EndpointWorkspaceSymbolProvider(output);
+    const symbolQuickPick = new SlashAwareWorkspaceSymbolQuickPick(endpointSymbols, output);
     const healthProvider = new HealthTreeProvider(supervisor.getHealth());
     const applicationsProvider = new ApplicationsTreeProvider();
     const statusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 50);
@@ -29,6 +31,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             updateStatusBar(statusBar, health.phase, health.applicationCount, health.lastError);
         }),
         supervisor.onDidChangeApplications((applications) => applicationsProvider.update(applications)),
+        vscode.commands.registerCommand('springSupervisor.goToSymbolOrEndpoint', () => symbolQuickPick.show()),
         vscode.commands.registerCommand('springSupervisor.refresh', async () => {
             endpointSymbols.clearCache();
             await supervisor.refresh();
