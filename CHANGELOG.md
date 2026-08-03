@@ -1,5 +1,13 @@
 # Change Log
 
+## 0.4.0
+
+- Added an optional slash-aware Workspace Symbol Provider for `Ctrl+T` endpoint searches.
+- Queries containing `/` reuse the Spring Boot Language Server's `@/` Endpoint Mapping symbol request.
+- Added a 30-second endpoint symbol cache so typing a URL does not send one full Spring request per keystroke.
+- Added an audited build pipeline for an unofficial Spring Boot Tools root-fix VSIX.
+- The root-fix build extends JDT classpath-listener registration to three minutes, handles terminal errors explicitly, and cleans failed registrations.
+
 ## 0.3.0
 
 - Wait for the Java `java.workspace.initialized` signal instead of treating `serverReady()` as full project readiness.
