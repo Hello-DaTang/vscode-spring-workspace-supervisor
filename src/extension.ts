@@ -1,7 +1,6 @@
 import * as vscode from 'vscode';
 import { EndpointWorkspaceSymbolProvider } from './endpointSymbols';
 import { SpringWorkspaceSupervisor } from './supervisor';
-import { SlashAwareWorkspaceSymbolQuickPick } from './symbolQuickPick';
 import { ApplicationTreeItem, ApplicationsTreeProvider, HealthTreeProvider } from './tree';
 import type { SpringBootApplication } from './types';
 
@@ -9,15 +8,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     const output = vscode.window.createOutputChannel('Spring Workspace Supervisor', { log: true });
     const supervisor = new SpringWorkspaceSupervisor(output);
     const endpointSymbols = new EndpointWorkspaceSymbolProvider(output);
-    const symbolQuickPick = new SlashAwareWorkspaceSymbolQuickPick(endpointSymbols, output);
     const healthProvider = new HealthTreeProvider(supervisor.getHealth());
     const applicationsProvider = new ApplicationsTreeProvider();
     const statusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 50);
     statusBar.command = 'springSupervisor.diagnose';
     statusBar.name = 'Spring Workspace Supervisor';
     statusBar.show();
-
-    await updateCtrlTContext();
 
     context.subscriptions.push(
         output,
@@ -28,17 +24,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         vscode.languages.registerWorkspaceSymbolProvider(endpointSymbols),
         vscode.window.registerTreeDataProvider('springSupervisor.health', healthProvider),
         vscode.window.registerTreeDataProvider('springSupervisor.apps', applicationsProvider),
-        vscode.workspace.onDidChangeConfiguration((event) => {
-            if (event.affectsConfiguration('springSupervisor.overrideCtrlT')) {
-                void updateCtrlTContext();
-            }
-        }),
         supervisor.onDidChangeHealth((health) => {
             healthProvider.update(health);
             updateStatusBar(statusBar, health.phase, health.applicationCount, health.lastError);
         }),
         supervisor.onDidChangeApplications((applications) => applicationsProvider.update(applications)),
-        vscode.commands.registerCommand('springSupervisor.goToSymbolOrEndpoint', () => symbolQuickPick.show()),
         vscode.commands.registerCommand('springSupervisor.refresh', async () => {
             endpointSymbols.clearCache();
             await supervisor.refresh();
@@ -82,12 +72,6 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
 export function deactivate(): void {
     // Disposables registered in the extension context own shutdown.
-}
-
-async function updateCtrlTContext(): Promise<void> {
-    const enabled = vscode.workspace.getConfiguration('springSupervisor')
-        .get<boolean>('overrideCtrlT', true);
-    await vscode.commands.executeCommand('setContext', 'springSupervisor.ctrlTEnabled', enabled);
 }
 
 function resolveApplication(value: unknown): SpringBootApplication | undefined {
