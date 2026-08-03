@@ -17,6 +17,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     statusBar.name = 'Spring Workspace Supervisor';
     statusBar.show();
 
+    await updateCtrlTContext();
+
     context.subscriptions.push(
         output,
         supervisor,
@@ -26,6 +28,11 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         vscode.languages.registerWorkspaceSymbolProvider(endpointSymbols),
         vscode.window.registerTreeDataProvider('springSupervisor.health', healthProvider),
         vscode.window.registerTreeDataProvider('springSupervisor.apps', applicationsProvider),
+        vscode.workspace.onDidChangeConfiguration((event) => {
+            if (event.affectsConfiguration('springSupervisor.overrideCtrlT')) {
+                void updateCtrlTContext();
+            }
+        }),
         supervisor.onDidChangeHealth((health) => {
             healthProvider.update(health);
             updateStatusBar(statusBar, health.phase, health.applicationCount, health.lastError);
@@ -75,6 +82,12 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
 export function deactivate(): void {
     // Disposables registered in the extension context own shutdown.
+}
+
+async function updateCtrlTContext(): Promise<void> {
+    const enabled = vscode.workspace.getConfiguration('springSupervisor')
+        .get<boolean>('overrideCtrlT', true);
+    await vscode.commands.executeCommand('setContext', 'springSupervisor.ctrlTEnabled', enabled);
 }
 
 function resolveApplication(value: unknown): SpringBootApplication | undefined {
