@@ -18,23 +18,117 @@ interface BuildCandidate {
     readonly springBuild: boolean;
 }
 
+interface ParsedMain {
+    readonly file: vscode.Uri;
+    readonly fullyQualifiedName: string;
+}
+
+interface CandidateWithMains {
+    readonly candidate: BuildCandidate;
+    readonly mains: ParsedMain[];
+}
+
+const CLASSPATH_LOOKUP_TIMEOUT_MS = 8000;
+const CLASSPATH_LOOKUP_CONCURRENCY = 4;
+
 export class WorkspaceScanner {
     public constructor(private readonly output: vscode.OutputChannel) {}
 
     public async scan(javaApi: JavaExtensionApi | undefined, javaReady: boolean): Promise<SpringBootApplication[]> {
+        const startedAt = Date.now();
         const buildFiles = await vscode.workspace.findFiles(
             '**/{pom.xml,build.gradle,build.gradle.kts}',
             '**/{target,build,node_modules,.git,.gradle,out}/**',
         );
 
-        const candidates = await Promise.all(buildFiles.map((file) => this.readBuildCandidate(file)));
-        const applications: SpringBootApplication[] = [];
+        const candidates = (await Promise.all(buildFiles.map((file) => this.readBuildCandidate(file))))
+            .filter((value): value is BuildCandidate => value !== undefined);
 
-        for (const candidate of candidates.filter((value): value is BuildCandidate => value !== undefined)) {
-            applications.push(...await this.scanCandidate(candidate, javaApi, javaReady));
+        // A single global search is dramatically faster than one findFiles request per module
+        // in large Maven reactors. Common Spring Boot launch class suffixes are covered here;
+        // Spring build modules without a matching class remain visible as discovered projects.
+        const maxMainFiles = vscode.workspace.getConfiguration('springSupervisor')
+            .get<number>('maxMainClassFiles', 5000);
+        const likelyMainFiles = await vscode.workspace.findFiles(
+            '**/src/main/java/**/*{Application,Server,Main}.java',
+            '**/{target,build,node_modules,.git,.gradle,out}/**',
+            maxMainFiles,
+        );
+        const parsedMains = (await Promise.all(likelyMainFiles.map((file) => this.readMainClass(file))))
+            .filter((value): value is ParsedMain => value !== undefined);
+
+        const grouped = new Map<string, CandidateWithMains>();
+        for (const candidate of candidates) {
+            grouped.set(candidate.root.toString(), { candidate, mains: [] });
+        }
+        for (const main of parsedMains) {
+            const owner = findOwningCandidate(main.file, candidates);
+            if (owner) {
+                grouped.get(owner.root.toString())?.mains.push(main);
+            }
         }
 
-        return deduplicateApplications(applications).sort((left, right) => left.name.localeCompare(right.name));
+        const applications: SpringBootApplication[] = [];
+        for (const { candidate, mains } of grouped.values()) {
+            if (mains.length === 0) {
+                if (!candidate.springBuild || (candidate.tool === 'maven' && isAggregatorPom(candidate.text))) {
+                    continue;
+                }
+                applications.push(this.createApplication(candidate, undefined, false, ['build-file']));
+                continue;
+            }
+
+            for (const main of mains) {
+                const detectedBy = ['main-class'];
+                if (candidate.springBuild) {
+                    detectedBy.push('build-file');
+                }
+                applications.push(this.createApplication(candidate, main, false, detectedBy));
+            }
+        }
+
+        const deduplicated = deduplicateApplications(applications)
+            .sort((left, right) => left.name.localeCompare(right.name));
+
+        const verifyClasspath = vscode.workspace.getConfiguration('springSupervisor')
+            .get<boolean>('verifyRuntimeClasspath', false);
+        const getClasspaths = javaApi?.getClasspaths;
+        if (javaReady && verifyClasspath && getClasspaths) {
+            const indexed = deduplicated.map((application, index) => ({ application, index }));
+            await runWithConcurrency(indexed, CLASSPATH_LOOKUP_CONCURRENCY, async ({ application, index }) => {
+                if (!application.mainFile || !application.mainClass) {
+                    return;
+                }
+                try {
+                    const result = await withTimeout(
+                        getClasspaths(application.mainFile.toString(), { scope: 'runtime' }),
+                        CLASSPATH_LOOKUP_TIMEOUT_MS,
+                        `Classpath lookup timed out for ${application.mainClass}`,
+                    );
+                    const classpathVerified = containsSpringRuntimeClasspath([
+                        ...result.classpaths,
+                        ...result.modulepaths,
+                    ]);
+                    deduplicated[index] = {
+                        ...application,
+                        classpathVerified,
+                        detectedBy: classpathVerified && !application.detectedBy.includes('runtime-classpath')
+                            ? [...application.detectedBy, 'runtime-classpath']
+                            : application.detectedBy,
+                    };
+                } catch (error) {
+                    this.output.appendLine(
+                        `[scanner] Classpath lookup failed for ${application.mainClass}: ${toErrorMessage(error)}`,
+                    );
+                }
+            });
+        }
+
+        this.output.appendLine(
+            `[scanner] Discovery completed in ${Date.now() - startedAt}ms: `
+            + `${candidates.length} build file(s), ${parsedMains.length} candidate main class(es).`,
+        );
+        return deduplicated;
     }
 
     private async readBuildCandidate(file: vscode.Uri): Promise<BuildCandidate | undefined> {
@@ -55,79 +149,20 @@ export class WorkspaceScanner {
         }
     }
 
-    private async scanCandidate(
-        candidate: BuildCandidate,
-        javaApi: JavaExtensionApi | undefined,
-        javaReady: boolean,
-    ): Promise<SpringBootApplication[]> {
-        const maxFiles = vscode.workspace.getConfiguration('springSupervisor')
-            .get<number>('maxJavaFilesPerProject', 2000);
-
-        const likelyMainFiles = await vscode.workspace.findFiles(
-            new vscode.RelativePattern(candidate.root, 'src/main/java/**/*Application.java'),
-            '**/{target,build}/**',
-            maxFiles,
-        );
-        const javaFiles = likelyMainFiles.length > 0
-            ? likelyMainFiles
-            : await vscode.workspace.findFiles(
-                new vscode.RelativePattern(candidate.root, 'src/main/java/**/*.java'),
-                '**/{target,build}/**',
-                maxFiles,
-            );
-
-        const parsedMains: Array<{ readonly file: vscode.Uri; readonly fullyQualifiedName: string }> = [];
-        for (const javaFile of javaFiles) {
-            try {
-                const bytes = await vscode.workspace.fs.readFile(javaFile);
-                const parsed = parseSpringBootMainClass(Buffer.from(bytes).toString('utf8'));
-                if (parsed) {
-                    parsedMains.push({ file: javaFile, fullyQualifiedName: parsed.fullyQualifiedName });
-                }
-            } catch (error) {
-                this.output.appendLine(`[scanner] Failed to inspect ${javaFile.fsPath}: ${toErrorMessage(error)}`);
-            }
+    private async readMainClass(file: vscode.Uri): Promise<ParsedMain | undefined> {
+        try {
+            const bytes = await vscode.workspace.fs.readFile(file);
+            const parsed = parseSpringBootMainClass(Buffer.from(bytes).toString('utf8'));
+            return parsed ? { file, fullyQualifiedName: parsed.fullyQualifiedName } : undefined;
+        } catch (error) {
+            this.output.appendLine(`[scanner] Failed to inspect ${file.fsPath}: ${toErrorMessage(error)}`);
+            return undefined;
         }
-
-        if (parsedMains.length === 0) {
-            if (!candidate.springBuild || (candidate.tool === 'maven' && isAggregatorPom(candidate.text))) {
-                return [];
-            }
-            return [this.createApplication(candidate, undefined, false, ['build-file'])];
-        }
-
-        const applications: SpringBootApplication[] = [];
-        for (const main of parsedMains) {
-            let classpathVerified = false;
-            const detectedBy = ['main-class'];
-            if (candidate.springBuild) {
-                detectedBy.push('build-file');
-            }
-
-            const verifyClasspath = vscode.workspace.getConfiguration('springSupervisor')
-                .get<boolean>('verifyRuntimeClasspath', true);
-            if (javaReady && verifyClasspath && javaApi?.getClasspaths) {
-                try {
-                    const result = await javaApi.getClasspaths(main.file.toString(), { scope: 'runtime' });
-                    classpathVerified = containsSpringRuntimeClasspath([...result.classpaths, ...result.modulepaths]);
-                    if (classpathVerified) {
-                        detectedBy.push('runtime-classpath');
-                    }
-                } catch (error) {
-                    this.output.appendLine(
-                        `[scanner] Classpath lookup failed for ${main.fullyQualifiedName}: ${toErrorMessage(error)}`,
-                    );
-                }
-            }
-
-            applications.push(this.createApplication(candidate, main, classpathVerified, detectedBy));
-        }
-        return applications;
     }
 
     private createApplication(
         candidate: BuildCandidate,
-        main: { readonly file: vscode.Uri; readonly fullyQualifiedName: string } | undefined,
+        main: ParsedMain | undefined,
         classpathVerified: boolean,
         detectedBy: readonly string[],
     ): SpringBootApplication {
@@ -155,12 +190,58 @@ export class WorkspaceScanner {
     }
 }
 
+function findOwningCandidate(file: vscode.Uri, candidates: readonly BuildCandidate[]): BuildCandidate | undefined {
+    let owner: BuildCandidate | undefined;
+    for (const candidate of candidates) {
+        const relative = path.relative(candidate.root.fsPath, file.fsPath);
+        if (relative.startsWith('..') || path.isAbsolute(relative)) {
+            continue;
+        }
+        if (!owner || candidate.root.fsPath.length > owner.root.fsPath.length) {
+            owner = candidate;
+        }
+    }
+    return owner;
+}
+
 function deduplicateApplications(applications: readonly SpringBootApplication[]): SpringBootApplication[] {
     const result = new Map<string, SpringBootApplication>();
     for (const application of applications) {
         result.set(application.id, application);
     }
     return [...result.values()];
+}
+
+async function runWithConcurrency<T>(
+    items: readonly T[],
+    concurrency: number,
+    worker: (item: T) => Promise<void>,
+): Promise<void> {
+    let nextIndex = 0;
+    const runners = Array.from({ length: Math.min(concurrency, items.length) }, async () => {
+        while (nextIndex < items.length) {
+            const index = nextIndex;
+            nextIndex += 1;
+            await worker(items[index]!);
+        }
+    });
+    await Promise.all(runners);
+}
+
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string): Promise<T> {
+    return new Promise<T>((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error(message)), timeoutMs);
+        promise.then(
+            (value) => {
+                clearTimeout(timer);
+                resolve(value);
+            },
+            (error: unknown) => {
+                clearTimeout(timer);
+                reject(error instanceof Error ? error : new Error(String(error)));
+            },
+        );
+    });
 }
 
 function toErrorMessage(error: unknown): string {
