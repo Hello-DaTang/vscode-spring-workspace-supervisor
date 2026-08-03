@@ -11,6 +11,10 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: spring-supervisor-manifest-cleanup-v051
+  cancel-in-progress: false
+
 jobs:
   migrate:
     runs-on: ubuntu-latest
