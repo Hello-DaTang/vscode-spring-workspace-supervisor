@@ -25,9 +25,15 @@ def main() -> None:
     cache = cache_file.read_text(encoding="utf-8")
     cache = replace_once(
         cache,
-        "private static final Duration INITIALIZE_TIMEOUT = Duration.ofSeconds(10);",
-        "private static final Duration INITIALIZE_TIMEOUT = Duration.ofMinutes(3);",
-        "increase classpath registration timeout",
+        "import java.time.Duration;\n",
+        "",
+        "remove destructive registration timeout import",
+    )
+    cache = replace_once(
+        cache,
+        "\tprivate static final Duration INITIALIZE_TIMEOUT = Duration.ofSeconds(10);\n",
+        "",
+        "remove destructive registration timeout",
     )
     cache = replace_once(
         cache,
@@ -47,17 +53,32 @@ def main() -> None:
 \t\t\t\treturn;
 \t\t\t}
 
-\t\t\tlog.info(\"Adding classpath listener with timeout \" + INITIALIZE_TIMEOUT);
+\t\t\t/*
+\t\t\t * Do not put a wall-clock timeout around this request. On large workspaces the
+\t\t\t * JDT extension can start streaming the initial classpath snapshot before the
+\t\t\t * JSON-RPC response to sts.java.addClasspathListener reaches Boot LS. The
+\t\t\t * callback channel is already functional during that period. Cancelling it on a
+\t\t\t * timeout unregisters the callback command while JDT still has queued events,
+\t\t\t * causing command-not-found errors and an empty project cache.
+\t\t\t */
+\t\t\tlog.info(\"Adding classpath listener without a destructive registration timeout\");
+\t\t\tclasspathListenerEnabled = true;
+\t\t\tnotifyProjectObserverSupported();
+
 \t\t\tfinal Mono<Disposable> request = server.addClasspathListener(CLASSPATH_LISTENER)
-\t\t\t\t\t.timeout(INITIALIZE_TIMEOUT)
 \t\t\t\t\t.doOnSubscribe(x -> log.debug(\"addClasspathListener ...\"))
 \t\t\t\t\t.doOnSuccess(x -> log.debug(\"addClasspathListener DONE\"));
 
 \t\t\tclasspathListenerRequest = request;
-\t\t\tclasspathListenerRegistration = request.subscribe(
+\t\t\tDisposable registration = request.subscribe(
 \t\t\t\t\tdisposable -> completeClasspathListenerRegistration(request, disposable),
 \t\t\t\t\terror -> failClasspathListenerRegistration(request, error)
 \t\t\t);
+\t\t\tif (classpathListenerRequest == request) {
+\t\t\t\tclasspathListenerRegistration = registration;
+\t\t\t} else {
+\t\t\t\tregistration.dispose();
+\t\t\t}
 \t\t} else {
 \t\t\tlog.info(\"Removing classpath listener enabled=false\");
 \t\t\tclasspathListenerRequest = null;
@@ -83,8 +104,7 @@ def main() -> None:
 \t\tclasspathListenerRequest = null;
 \t\tclasspathListenerRegistration = null;
 \t\tDISPOSABLE.update(disposable);
-\t\tclasspathListenerEnabled = true;
-\t\tnotifyProjectObserverSupported();
+\t\tlog.info(\"Classpath listener registration response received; initial snapshot channel remains active.\");
 \t}
 
 \tprivate synchronized void failClasspathListenerRegistration(Mono<Disposable> request, Throwable error) {
@@ -94,9 +114,13 @@ def main() -> None:
 
 \t\tclasspathListenerRequest = null;
 \t\tclasspathListenerRegistration = null;
+\t\tDISPOSABLE.update(Disposables.single());
+\t\tboolean changed = classpathListenerEnabled;
 \t\tclasspathListenerEnabled = false;
-\t\tlog.error(\"Unable to register classpath listener with JDT after waiting \" + INITIALIZE_TIMEOUT + \".\", error);
-\t\tnotifyProjectObserverSupported();
+\t\tlog.error(\"Unable to register classpath listener with JDT.\", error);
+\t\tif (changed) {
+\t\t\tnotifyProjectObserverSupported();
+\t\t}
 \t}
 \t
 \t@Override
@@ -123,25 +147,25 @@ def main() -> None:
         manager,
         "\t\treturn\n\t\t\tregisterCallbackCommand\n\t\t\t.then(registerClasspathListener)\n\t\t\t.thenReturn(cleanups);",
         "\t\treturn\n\t\t\tregisterCallbackCommand\n\t\t\t.then(registerClasspathListener)\n\t\t\t.thenReturn(cleanups)\n\t\t\t.doOnError(error -> cleanups.dispose())\n\t\t\t.doOnCancel(cleanups::dispose);",
-        "cleanup failed or cancelled registrations",
+        "cleanup genuine failed or explicitly cancelled registrations",
     )
     manager_file.write_text(manager, encoding="utf-8")
 
     package = json.loads(package_file.read_text(encoding="utf-8"))
-    package["version"] = "2.4.1"
+    package["version"] = "2.4.2"
     package["displayName"] = "Spring Boot Tools (Root-Fix Build)"
     package["description"] = (
         "Unofficial EPL-1.0 root-fix build of Spring Boot Tools. "
-        "Extends JDT classpath-listener registration to three minutes and cleans up failed registrations."
+        "Keeps the JDT classpath callback alive while large initial workspace snapshots are streamed."
     )
     package["rootFixBuild"] = {
         "source": "https://github.com/spring-projects/spring-tools",
         "patchRepository": "https://github.com/Hello-DaTang/vscode-spring-workspace-supervisor",
-        "patch": "classpath-listener-timeout-and-cleanup-v1",
+        "patch": "classpath-listener-backpressure-v2",
     }
     package_file.write_text(json.dumps(package, indent=2) + "\n", encoding="utf-8")
 
-    print("Applied Spring Boot Tools classpath-listener root fix.")
+    print("Applied Spring Boot Tools classpath-listener root fix v2.")
 
 
 if __name__ == "__main__":
